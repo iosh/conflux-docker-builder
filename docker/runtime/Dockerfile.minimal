@@ -1,0 +1,250 @@
+# syntax=docker/dockerfile:1.4
+#
+# Unified Conflux Node Dockerfile with multi-architecture builder stages.
+#
+# This file contains three main stages:
+# 1. builder-amd64: Compiles for linux/amd64 with haswell optimizations.
+# 2. builder-arm64: Cross-compiles for linux/arm64.
+# 3. final: A minimal debian-based runtime image that selects the correct binary.
+#
+
+# ==============================================================================
+# STAGE 1: Builder for linux/amd64 (with haswell optimization)
+# ==============================================================================
+ARG UBUNTU_VERSION=24.04
+FROM ubuntu:${UBUNTU_VERSION} AS builder-amd64
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y curl wget software-properties-common gnupg ca-certificates git && \
+    wget https://apt.llvm.org/llvm.sh && \
+    chmod +x llvm.sh && \
+    ./llvm.sh 18 && \
+    apt-get install -y libsqlite3-dev pkg-config cmake libc++-18-dev unzip && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm llvm.sh
+
+RUN set -ex; \
+    OPENSSL_VERSION="3.5.1"; \
+    OPENSSL_SHA256="529043b15cffa5f36077a4d0af83f3de399807181d607441d734196d889b641f"; \
+    wget -O openssl.tar.gz "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz"; \
+    echo "${OPENSSL_SHA256} openssl.tar.gz" | sha256sum -c -; \
+    tar -xzf openssl.tar.gz; \
+    cd "openssl-${OPENSSL_VERSION}"; \
+    ./config --prefix=/opt/openssl --openssldir=/opt/openssl no-tests -march=haswell; \
+    make -j$(nproc); \
+    make install_sw; \
+    cd ..; \
+    rm -rf "openssl-${OPENSSL_VERSION}" openssl.tar.gz
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --profile minimal --default-toolchain none -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+
+ENV CC=clang-18
+ENV CXX=clang++-18
+ENV CFLAGS="-march=haswell"
+ENV CXXFLAGS="-march=haswell -std=c++11 -stdlib=libc++"
+ENV LDFLAGS="-stdlib=libc++"
+ENV RUSTFLAGS="-C target-cpu=haswell"
+ENV OPENSSL_DIR=/opt/openssl
+ENV OPENSSL_LIB_DIR=/opt/openssl/lib64
+ENV OPENSSL_INCLUDE_DIR=/opt/openssl/include
+ENV PKG_CONFIG_PATH=/opt/openssl/lib64/pkgconfig
+
+
+ARG UPSTREAM_REF
+ARG SOURCE_REPO=https://github.com/Conflux-Chain/conflux-rust.git
+WORKDIR /workspace
+RUN git clone --depth 1 --branch ${UPSTREAM_REF} ${SOURCE_REPO} . && \
+    git config --global --add safe.directory /workspace
+
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/workspace/target \
+    cargo build --release --target x86_64-unknown-linux-gnu --bin conflux
+
+COPY Cargo.toml Cargo.lock ./
+COPY tools/ tools/
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/workspace/target \
+    cargo build --release --bin devnetctl
+
+
+# ==============================================================================
+# STAGE 2: Builder for linux/arm64 (cross-compilation)
+# ==============================================================================
+FROM ubuntu:${UBUNTU_VERSION} AS builder-arm64
+
+ENV DEBIAN_FRONTEND=noninteractive
+ARG UBUNTU_CODENAME=noble
+
+RUN dpkg --add-architecture arm64 && \
+    rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*.sources
+RUN tee /etc/apt/sources.list.d/amd64.list > /dev/null <<EOF
+deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ ${UBUNTU_CODENAME} main restricted universe multiverse
+deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ ${UBUNTU_CODENAME}-updates main restricted universe multiverse
+deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ ${UBUNTU_CODENAME}-backports main restricted universe multiverse
+deb [arch=amd64] http://security.ubuntu.com/ubuntu/ ${UBUNTU_CODENAME}-security main restricted universe multiverse
+EOF
+RUN tee /etc/apt/sources.list.d/arm64.list > /dev/null <<EOF
+deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${UBUNTU_CODENAME} main restricted universe multiverse
+deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${UBUNTU_CODENAME}-updates main restricted universe multiverse
+deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${UBUNTU_CODENAME}-backports main restricted universe multiverse
+deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${UBUNTU_CODENAME}-security main restricted universe multiverse
+EOF
+
+RUN apt-get update && \
+    apt-get install -y curl wget software-properties-common gnupg ca-certificates pkg-config cmake perl git && \
+    wget https://apt.llvm.org/llvm.sh && \
+    chmod +x llvm.sh && \
+    ./llvm.sh 18 && \
+    apt-get install -y \
+    libsqlite3-dev:arm64 \
+    crossbuild-essential-arm64 \
+    libc++-18-dev:arm64 && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm llvm.sh
+
+ENV CROSS_COMPILE=aarch64-linux-gnu-
+RUN set -ex; \
+    OPENSSL_VERSION="3.5.1"; \
+    OPENSSL_SHA256="529043b15cffa5f36077a4d0af83f3de399807181d607441d734196d889b641f"; \
+    wget -O openssl.tar.gz "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz"; \
+    echo "${OPENSSL_SHA256} openssl.tar.gz" | sha256sum -c -; \
+    tar -xzf openssl.tar.gz; \
+    cd "openssl-${OPENSSL_VERSION}"; \
+    perl ./Configure linux-aarch64 --prefix=/opt/openssl-aarch64 --openssldir=/opt/openssl-aarch64 no-tests -march=armv8.2-a; \
+    make -j$(nproc); \
+    make install_sw; \
+    cd ..; \
+    rm -rf "openssl-${OPENSSL_VERSION}" openssl.tar.gz
+
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --profile minimal --default-toolchain none -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN rustup target add aarch64-unknown-linux-gnu
+
+# 2.5. Set up build environment for arm64
+ENV CC_aarch64_unknown_linux_gnu="clang-18"
+ENV CXX_aarch64_unknown_linux_gnu="clang++-18"
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="clang-18"
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="\
+    -C linker=clang-18 \
+    -C link-arg=--target=aarch64-linux-gnu \
+    -C link-arg=-fuse-ld=lld \
+    -C link-arg=-L/usr/lib/aarch64-linux-gnu \
+    -C link-arg=-lc++ \
+    -C link-arg=-lc++abi"
+ENV PKG_CONFIG_ALLOW_CROSS=1
+ENV CFLAGS_aarch64_unknown_linux_gnu="--target=aarch64-linux-gnu -march=armv8.2-a"
+ENV CXXFLAGS_aarch64_unknown_linux_gnu="--target=aarch64-linux-gnu -march=armv8.2-a -stdlib=libc++"
+ENV OPENSSL_DIR_aarch64_unknown_linux_gnu=/opt/openssl-aarch64
+ENV OPENSSL_LIB_DIR_aarch64_unknown_linux_gnu=/opt/openssl-aarch64/lib
+ENV OPENSSL_INCLUDE_DIR_aarch64_unknown_linux_gnu=/opt/openssl-aarch64/include
+ENV PKG_CONFIG_PATH_aarch64_unknown_linux_gnu=/opt/openssl-aarch64/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig
+
+# 2.6. Clone source and build
+ARG UPSTREAM_REF
+ARG SOURCE_REPO=https://github.com/Conflux-Chain/conflux-rust.git
+WORKDIR /workspace
+RUN git clone --depth 1 --branch ${UPSTREAM_REF} ${SOURCE_REPO} . && \
+    git config --global --add safe.directory /workspace
+
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/workspace/target \
+    cargo build --release --target aarch64-unknown-linux-gnu --bin conflux
+
+# Build devnetctl tool in the same stage
+COPY Cargo.toml Cargo.lock ./
+COPY tools/ tools/
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/workspace/target \
+    cargo build --release --bin devnetctl
+
+
+# ==============================================================================
+# STAGE 3: Final runtime image
+# ==============================================================================
+FROM debian:bookworm-slim AS final
+
+ARG TARGETARCH
+ARG NETWORK
+ARG UPSTREAM_REF
+
+ENV CFX_USER=conflux
+ENV CFX_UID=10001
+ENV CFX_GID=10001
+ENV HOME_DIR=/home/${CFX_USER}
+ENV CONFIG_DIR=${HOME_DIR}/run
+
+# 1. Install dependencies and create non-root user
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    groupadd -g ${CFX_GID} ${CFX_USER} && \
+    useradd -u ${CFX_UID} -g ${CFX_GID} -m -s /bin/bash ${CFX_USER} && \
+    rm -rf /var/lib/apt/lists/*
+
+# 2. Copy binaries from the correct builder stages based on architecture
+COPY --from=builder-amd64 /workspace/target/x86_64-unknown-linux-gnu/release/conflux /tmp/conflux-amd64
+COPY --from=builder-arm64 /workspace/target/aarch64-unknown-linux-gnu/release/conflux /tmp/conflux-arm64
+RUN if [ "${TARGETARCH}" = "amd64" ]; then \
+      cp /tmp/conflux-amd64 /usr/local/bin/conflux; \
+    elif [ "${TARGETARCH}" = "arm64" ]; then \
+      cp /tmp/conflux-arm64 /usr/local/bin/conflux; \
+    fi && \
+    rm -f /tmp/conflux-* && \
+    chmod +x /usr/local/bin/conflux
+
+# Copy devnetctl from the correct builder stage based on architecture (will be removed for non-devnet builds)
+COPY --from=builder-amd64 /workspace/target/release/devnetctl /tmp/devnetctl-amd64
+COPY --from=builder-arm64 /workspace/target/release/devnetctl /tmp/devnetctl-arm64
+RUN if [ "${TARGETARCH}" = "amd64" ]; then \
+      cp /tmp/devnetctl-amd64 /usr/local/bin/devnetctl; \
+    elif [ "${TARGETARCH}" = "arm64" ]; then \
+      cp /tmp/devnetctl-arm64 /usr/local/bin/devnetctl; \
+    fi && \
+    rm -f /tmp/devnetctl-* && \
+    chmod +x /usr/local/bin/devnetctl
+RUN if [ "${NETWORK}" != "devnet" ]; then \
+      echo "==> Removing devnetctl for ${NETWORK} build"; \
+      rm -f /usr/local/bin/devnetctl; \
+    else \
+      echo "==> Keeping devnetctl for devnet build"; \
+    fi
+
+# 3. Copy configurations based on NETWORK argument
+RUN if [ "${NETWORK}" = "devnet" ]; then \
+      echo "==> Using devnet configuration from configs/ directory"; \
+    else \
+      echo "==> Will copy configuration for ${NETWORK} from upstream source"; \
+    fi
+
+# For devnet, copy from local `configs` directory (conditional)
+COPY --chown=${CFX_USER}:${CFX_USER} configs/devnet /tmp/devnet-config
+RUN if [ "${NETWORK}" = "devnet" ]; then \
+      cp -r /tmp/devnet-config ${CONFIG_DIR}; \
+    fi && rm -rf /tmp/devnet-config
+
+# For mainnet/testnet, copy from the builder stage where the source was checked out
+COPY --from=builder-amd64 /workspace/run/ /tmp/upstream-configs-amd64/
+COPY --from=builder-arm64 /workspace/run/ /tmp/upstream-configs-arm64/
+RUN if [ "${NETWORK}" = "mainnet" ] || [ "${NETWORK}" = "testnet" ]; then \
+      if [ "${TARGETARCH}" = "amd64" ]; then \
+        cp -r /tmp/upstream-configs-amd64/${NETWORK}/run/. ${CONFIG_DIR}/; \
+      elif [ "${TARGETARCH}" = "arm64" ]; then \
+        cp -r /tmp/upstream-configs-arm64/${NETWORK}/run/. ${CONFIG_DIR}/; \
+      fi; \
+      chown -R ${CFX_USER}:${CFX_USER} ${CONFIG_DIR}; \
+    fi && rm -rf /tmp/upstream-configs-*
+
+USER ${CFX_USER}
+# By default, use the data directory as the working directory
+WORKDIR /data
+
+EXPOSE 32323 12537
+
+COPY docker/runtime/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
