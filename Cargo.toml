@@ -9,8 +9,13 @@ name = "devnetctl"
 path = "tools/devnetctl/src/main.rs"
 
 
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
 [dependencies]
-
 cfx-types = { git = "https://github.com/Conflux-Chain/conflux-rust", rev = "1d2ab753f091e572bf7103007e585e7b700c8255" }
 cfxcore = { git = "https://github.com/Conflux-Chain/conflux-rust", rev = "1d2ab753f091e572bf7103007e585e7b700c8255" }
 cfxkey = { git = "https://github.com/Conflux-Chain/conflux-rust", rev = "1d2ab753f091e572bf7103007e585e7b700c8255" }
