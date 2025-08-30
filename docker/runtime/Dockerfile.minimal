@@ -179,6 +179,7 @@ ENV CFX_UID=10001
 ENV CFX_GID=10001
 ENV HOME_DIR=/home/${CFX_USER}
 ENV CONFIG_DIR=${HOME_DIR}/run
+ENV NETWORK=${NETWORK}
 
 # 1. Install dependencies and create non-root user
 RUN apt-get update && \
@@ -218,7 +219,8 @@ RUN if [ "${NETWORK}" = "mainnet" ] || [ "${NETWORK}" = "testnet" ]; then \
     fi && rm -rf /tmp/upstream-configs
 COPY docker/runtime/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
-USER ${CFX_USER}
+
 WORKDIR /data
+RUN ln -s /usr/local/bin/conflux /data/conflux
 EXPOSE 32323 12537
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
