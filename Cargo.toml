@@ -6,7 +6,7 @@ edition = "2024"
 
 [[bin]]
 name = "devnetctl"
-path = "tools/devnetctl/src/main.rs"
+path = "devnetctl/src/main.rs"
 
 
 [profile.release]
