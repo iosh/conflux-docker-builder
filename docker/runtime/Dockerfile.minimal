@@ -12,7 +12,7 @@
 # STAGE 1: Builder for linux/amd64 (with haswell optimization)
 # ==============================================================================
 ARG UBUNTU_VERSION=24.04
-FROM ubuntu:${UBUNTU_VERSION} AS builder-amd64
+FROM --platform=$BUILDPLATFORM ubuntu:${UBUNTU_VERSION} AS builder-amd64
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -73,7 +73,7 @@ RUN  cargo build --release --target x86_64-unknown-linux-gnu --bin devnetctl
 # ==============================================================================
 # STAGE 2: Builder for linux/arm64 (cross-compilation)
 # ==============================================================================
-FROM ubuntu:${UBUNTU_VERSION} AS builder-arm64
+FROM --platform=$BUILDPLATFORM ubuntu:${UBUNTU_VERSION} AS builder-arm64
 
 ENV DEBIAN_FRONTEND=noninteractive
 ARG UBUNTU_CODENAME=noble
@@ -157,12 +157,18 @@ WORKDIR /tools
 COPY devnetctl/ ./devnetctl
 COPY Cargo.toml Cargo.lock ./
 RUN rustup target add aarch64-unknown-linux-gnu && cargo build --release --target aarch64-unknown-linux-gnu --bin devnetctl
+# ==============================================================================
+# STAGE 3: Intermediate stage to select the correct builder
+# This stage's only purpose is to select the correct base image (builder)
+# based on the TARGETARCH and pass everything to the final stage.
+# ==============================================================================
 
+FROM builder-${TARGETARCH} AS intermediate
 
 # ==============================================================================
-# STAGE 3: Final runtime image
+# STAGE 4: Final runtime image
 # ==============================================================================
-FROM debian:bookworm-slim AS final
+FROM ubuntu:24.04 AS final
 
 ARG TARGETARCH
 ARG NETWORK
@@ -182,65 +188,37 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # 2. Copy binaries from the correct builder stages based on architecture
-COPY --from=builder-amd64 /conflux-rust/target/x86_64-unknown-linux-gnu/release/conflux /tmp/conflux-amd64
-COPY --from=builder-arm64 /conflux-rust/target/aarch64-unknown-linux-gnu/release/conflux /tmp/conflux-arm64
-RUN if [ "${TARGETARCH}" = "amd64" ]; then \
-    cp /tmp/conflux-amd64 /usr/local/bin/conflux; \
-    elif [ "${TARGETARCH}" = "arm64" ]; then \
-    cp /tmp/conflux-arm64 /usr/local/bin/conflux; \
-    fi && \
-    rm -f /tmp/conflux-* && \
-    chmod +x /usr/local/bin/conflux
-
-# Copy devnetctl from the correct builder stage based on architecture (will be removed for non-devnet builds)
-COPY --from=builder-amd64 /tools/target/x86_64-unknown-linux-gnu/release/devnetctl /tmp/devnetctl-amd64
-COPY --from=builder-arm64 /tools/target/aarch64-unknown-linux-gnu/release/devnetctl /tmp/devnetctl-arm64
-RUN if [ "${TARGETARCH}" = "amd64" ]; then \
-    cp /tmp/devnetctl-amd64 /usr/local/bin/devnetctl; \
-    elif [ "${TARGETARCH}" = "arm64" ]; then \
-    cp /tmp/devnetctl-arm64 /usr/local/bin/devnetctl; \
-    fi && \
-    rm -f /tmp/devnetctl-* && \
-    chmod +x /usr/local/bin/devnetctl
+COPY --from=intermediate /conflux-rust/target/*/release/conflux /usr/local/bin/conflux
+COPY --from=intermediate /tools/target/*/release/devnetctl /usr/local/bin/devnetctl
+RUN chmod +x /usr/local/bin/conflux /usr/local/bin/devnetctl
+# devnetctl logic (devnetctl is already copied, just need to handle removal)
 RUN if [ "${NETWORK}" != "devnet" ]; then \
     echo "==> Removing devnetctl for ${NETWORK} build"; \
     rm -f /usr/local/bin/devnetctl; \
     else \
     echo "==> Keeping devnetctl for devnet build"; \
     fi
-
 # 3. Copy configurations based on NETWORK argument
 RUN if [ "${NETWORK}" = "devnet" ]; then \
     echo "==> Using devnet configuration from configs/ directory"; \
     else \
     echo "==> Will copy configuration for ${NETWORK} from upstream source"; \
     fi
-
 # For devnet, copy from local `configs` directory (conditional)
 COPY --chown=${CFX_USER}:${CFX_USER} configs/devnet /tmp/devnet-config
 RUN if [ "${NETWORK}" = "devnet" ]; then \
-    cp -r /tmp/devnet-config ${CONFIG_DIR}; \
-    fi && rm -rf /tmp/devnet-config
-
-# For mainnet/testnet, copy from the builder stage where the source was checked out
-COPY --from=builder-amd64 /conflux-rust/run/ /tmp/upstream-configs-amd64/
-COPY --from=builder-arm64 /conflux-rust/run/ /tmp/upstream-configs-arm64/
-RUN if [ "${NETWORK}" = "mainnet" ] || [ "${NETWORK}" = "testnet" ]; then \
-    if [ "${TARGETARCH}" = "amd64" ]; then \
-    cp -r /tmp/upstream-configs-amd64/${NETWORK}/run/. ${CONFIG_DIR}/; \
-    elif [ "${TARGETARCH}" = "arm64" ]; then \
-    cp -r /tmp/upstream-configs-arm64/${NETWORK}/run/. ${CONFIG_DIR}/; \
-    fi; \
+    mkdir -p ${CONFIG_DIR} && cp -r /tmp/devnet-config/. ${CONFIG_DIR}; \
     chown -R ${CFX_USER}:${CFX_USER} ${CONFIG_DIR}; \
-    fi && rm -rf /tmp/upstream-configs-*
+    fi && rm -rf /tmp/devnet-config
+# For mainnet/testnet, copy from the intermediate stage
+COPY --from=intermediate /conflux-rust/run/ /tmp/upstream-configs/
+RUN if [ "${NETWORK}" = "mainnet" ] || [ "${NETWORK}" = "testnet" ]; then \
+    mkdir -p ${CONFIG_DIR} && cp -r /tmp/upstream-configs/${NETWORK}/run/. ${CONFIG_DIR}/; \
+    chown -R ${CFX_USER}:${CFX_USER} ${CONFIG_DIR}; \
+    fi && rm -rf /tmp/upstream-configs
 COPY docker/runtime/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
-
 USER ${CFX_USER}
-# By default, use the data directory as the working directory
 WORKDIR /data
-
 EXPOSE 32323 12537
-
-
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
