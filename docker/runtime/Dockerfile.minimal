@@ -178,7 +178,6 @@ ENV CFX_USER=conflux
 ENV CFX_UID=10001
 ENV CFX_GID=10001
 ENV HOME_DIR=/home/${CFX_USER}
-ENV CONFIG_DIR=${HOME_DIR}/run
 ENV NETWORK=${NETWORK}
 
 # 1. Install dependencies and create non-root user
@@ -199,24 +198,18 @@ RUN if [ "${NETWORK}" != "devnet" ]; then \
     else \
     echo "==> Keeping devnetctl for devnet build"; \
     fi
-# 3. Copy configurations based on NETWORK argument
+# 3. Copy configurations to temporary directory for entrypoint to use
+RUN mkdir -p /tmp/default-configs
+# Copy all configs and handle network-specific logic in one step
+COPY configs/devnet /tmp/default-configs-devnet
+COPY --from=intermediate /conflux-rust/run/ /tmp/default-configs-upstream
 RUN if [ "${NETWORK}" = "devnet" ]; then \
-    echo "==> Using devnet configuration from configs/ directory"; \
-    else \
-    echo "==> Will copy configuration for ${NETWORK} from upstream source"; \
-    fi
-# For devnet, copy from local `configs` directory (conditional)
-COPY --chown=${CFX_USER}:${CFX_USER} configs/devnet /tmp/devnet-config
-RUN if [ "${NETWORK}" = "devnet" ]; then \
-    mkdir -p ${CONFIG_DIR} && cp -r /tmp/devnet-config/. ${CONFIG_DIR}; \
-    chown -R ${CFX_USER}:${CFX_USER} ${CONFIG_DIR}; \
-    fi && rm -rf /tmp/devnet-config
-# For mainnet/testnet, copy from the intermediate stage
-COPY --from=intermediate /conflux-rust/run/ /tmp/upstream-configs/
-RUN if [ "${NETWORK}" = "mainnet" ] || [ "${NETWORK}" = "testnet" ]; then \
-    mkdir -p ${CONFIG_DIR} && cp -r /tmp/upstream-configs/${NETWORK}/run/. ${CONFIG_DIR}/; \
-    chown -R ${CFX_USER}:${CFX_USER} ${CONFIG_DIR}; \
-    fi && rm -rf /tmp/upstream-configs
+    cp -r /tmp/default-configs-devnet/* /tmp/default-configs/; \
+    elif [ "${NETWORK}" = "mainnet" ] || [ "${NETWORK}" = "testnet" ]; then \
+    cp -r /tmp/default-configs-upstream/* /tmp/default-configs/; \
+    fi && \
+    rm -rf /tmp/default-configs-devnet /tmp/default-configs-upstream && \
+    chown -R ${CFX_USER}:${CFX_USER} /tmp/default-configs
 COPY docker/runtime/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
