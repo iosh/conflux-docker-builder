@@ -25,6 +25,19 @@ docker run -v ./data:/data -p 12537:12537 ghcr.io/iosh/conflux-node:v3.0.1-testn
 - **Optimized Builds**: Haswell optimizations for AMD64, ARMv8.2-a for ARM64
 - **Easy Usage**: Single data directory mount point `/data`
 
+## DevNet Configuration
+
+### Chain IDs
+- **Core Space Chain ID**: 1234
+- **eSpace Chain ID**: 1235
+
+### Genesis Accounts
+DevNet comes pre-configured with 20 accounts, each with 1000 CFX balance. These accounts are generated using the standard Hardhat test mnemonic:
+
+**Mnemonic**: `test test test test test test test test test test test junk`
+
+The accounts and their addresses will be displayed when starting the devnet container, showing both Core Space and eSpace addresses for easy access during development.
+
 ## Building Locally
 
 ```bash
