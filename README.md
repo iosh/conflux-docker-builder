@@ -13,8 +13,8 @@ docker run -v ./data:/data -p 12537:12537 ghcr.io/iosh/conflux-node:v3.0.1-devne
 # Run mainnet
 docker run -v ./data:/data -p 12537:12537 ghcr.io/iosh/conflux-node:v3.0.1-mainnet
 
-# Run testnet
-docker run -v ./data:/data -p 12537:12537 ghcr.io/iosh/conflux-node:v3.0.1-testnet
+# Run testnet (uses testnet-specific version)
+docker run -v ./data:/data -p 12537:12537 ghcr.io/iosh/conflux-node:v3.0.1-testnet-testnet
 ```
 
 ## Features
@@ -52,9 +52,15 @@ If no config is provided, default configurations are used automatically.
 
 ## Image Tags
 
-`ghcr.io/iosh/conflux-node:<version>-<network>`
+**Tag Naming Convention:** `ghcr.io/iosh/conflux-node:<source-version>-<network>`
+
+The naming follows a consistent pattern where:
+- **Mainnet/Devnet**: Use the standard conflux-rust version (e.g., `v3.0.1`)
+- **Testnet**: Use the testnet-specific version (e.g., `v3.0.1-testnet`)
+- **Network suffix**: Always added to clearly identify the network type
 
 Examples:
-- `ghcr.io/iosh/conflux-node:v3.0.1-mainnet`
-- `ghcr.io/iosh/conflux-node:v3.0.1-testnet`
-- `ghcr.io/iosh/conflux-node:v3.0.1-devnet`
+- `ghcr.io/iosh/conflux-node:v3.0.1-mainnet` (built from `v3.0.1` tag)
+- `ghcr.io/iosh/conflux-node:v3.0.1-testnet-testnet` (built from `v3.0.1-testnet` tag)
+- `ghcr.io/iosh/conflux-node:v3.0.1-testnet-fix-testnet` (built from `v3.0.1-testnet-fix` tag)  
+- `ghcr.io/iosh/conflux-node:v3.0.1-devnet` (built from `v3.0.1` tag)

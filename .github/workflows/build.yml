@@ -10,9 +10,13 @@ on:
   workflow_dispatch:
     inputs:
       upstream_ref:
-        description: "Upstream conflux-rust git tag or branch (e.g., v3.0.1)"
+        description: "Upstream conflux-rust git tag or branch for mainnet/devnet (e.g., v3.0.1)"
         required: true
         default: "v3.0.1"
+      testnet_ref:
+        description: "Upstream conflux-rust git tag or branch for testnet (e.g., v3.0.1-testnet)"
+        required: true
+        default: "v3.0.1-testnet"
       # We target groups in the bake file (e.g., "default" or "minimal")
       targets:
         description: "Bake targets to build (e.g., 'default' for all networks)"
@@ -57,6 +61,7 @@ jobs:
         run: |
           make build \
             UPSTREAM_REF=${{ github.event.inputs.upstream_ref }} \
+            TESTNET_REF=${{ github.event.inputs.testnet_ref }} \
             PUSH=${{ github.event.inputs.push }} \
             PLATFORMS=${{ github.event.inputs.platforms }} \
             TARGETS=${{ github.event.inputs.targets }} \

@@ -14,6 +14,10 @@ variable "UPSTREAM_REF" {
   default = "v3.0.1"
 }
 
+variable "TESTNET_REF" {
+  default = "v3.0.1-testnet"
+}
+
 variable "ORG" {
   default = "iosh"
 }
@@ -64,11 +68,13 @@ target "testnet" {
   inherits = ["_minimal"]
   args = {
     NETWORK = "testnet"
+    UPSTREAM_REF = TESTNET_REF
   }
-  tags = ["ghcr.io/${ORG}/${IMAGE_NAME}:${UPSTREAM_REF}-testnet"]
+  tags = ["ghcr.io/${ORG}/${IMAGE_NAME}:${TESTNET_REF}-testnet"]
   labels = {
     "org.opencontainers.image.title"       = "Conflux Node (testnet)"
     "org.opencontainers.image.description" = "A Docker image for Conflux testnet node."
+    "org.opencontainers.image.version"     = "${TESTNET_REF}"
   }
 }
 

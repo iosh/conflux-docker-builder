@@ -6,6 +6,7 @@ all: build
 # Variables - can be overridden from the command line, e.g., `make build PUSH=true`
 # Defaults are hardcoded here to remove the dependency on `yq`.
 UPSTREAM_REF ?= "v3.0.1"
+TESTNET_REF  ?= "v3.0.1-testnet"
 ORG          ?= "iosh"
 PUSH         ?= false
 LOAD         ?= false
@@ -18,8 +19,9 @@ BUILDX_NAME  ?= conflux-builder
 .PHONY: build
 build: ## Build all targets defined in the 'default' group in docker-bake.yml
 	@echo "==> Building images for targets [${TARGETS}] with platforms [${PLATFORMS}]..."
-	@echo "==> Upstream ref: ${UPSTREAM_REF}, Push: ${PUSH}, Load: ${LOAD}, Org: ${ORG}"
+	@echo "==> Upstream ref: ${UPSTREAM_REF}, Testnet ref: ${TESTNET_REF}, Push: ${PUSH}, Load: ${LOAD}, Org: ${ORG}"
 	UPSTREAM_REF=${UPSTREAM_REF} \
+	TESTNET_REF=${TESTNET_REF} \
 	ORG=${ORG} \
 	IMAGE_NAME="conflux-node" \
 	PUSH=${PUSH} \
