@@ -26,14 +26,6 @@ on:
         description: "Push the image to GHCR (true/false)"
         required: true
         default: "true"
-      org:
-        description: "The GitHub organization to publish to (e.g., your username)"
-        required: true
-        default: "iosh"
-      image_name:
-        description: "The image name (e.g., conflux-node)"
-        required: true
-        default: "conflux-node"
 
 jobs:
   build-and-publish:
@@ -45,7 +37,7 @@ jobs:
 
     steps:
       - name: "Checkout repository"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: "Set up QEMU for multi-architecture builds"
         uses: docker/setup-qemu-action@v3
@@ -65,9 +57,7 @@ jobs:
         run: |
           make build \
             UPSTREAM_REF=${{ github.event.inputs.upstream_ref }} \
-            ORG=${{ github.event.inputs.org }} \
-            IMAGE_NAME=${{ github.event.inputs.image_name }} \
             PUSH=${{ github.event.inputs.push }} \
             PLATFORMS=${{ github.event.inputs.platforms }} \
             TARGETS=${{ github.event.inputs.targets }} \
-            BUILDX_NAME=default
+            BUILDX_NAME=${{ steps.buildx.outputs.name }}
