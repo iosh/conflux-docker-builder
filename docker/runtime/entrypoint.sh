@@ -3,7 +3,6 @@ set -euo pipefail
 
 # Environment variables
 CFX_USER="${CFX_USER:-conflux}"
-HOME_DIR="${HOME_DIR:-/home/${CFX_USER}}"
 DEFAULT_CONFIG_DIR="/tmp/default-configs"
 DATA_DIR="/data"
 NETWORK="${NETWORK:-}"
@@ -49,7 +48,7 @@ setup_config() {
 
     if [ -d "$DEFAULT_CONFIG_DIR" ]; then
         cp -r "$DEFAULT_CONFIG_DIR"/* "$DATA_DIR/" 2>/dev/null || true
-        echo "==> Default configuration copied to $DATA_DIR/ (official layout)"
+        echo "==> Default $NETWORK configuration copied to $DATA_DIR/"
     fi
     
     if [ "$NETWORK" = "devnet" ]; then
@@ -62,16 +61,11 @@ setup_config() {
 get_chain_id_from_config() {
     local config_filename=$(get_config_filename)
     local config_file="$DATA_DIR/$config_filename"
-    local chain_id=""
     
     if [ -f "$config_file" ]; then
         # Extract chain_id using grep and awk
-        chain_id=$(grep "^chain_id" "$config_file" | head -1 | awk '{print $3}' | tr -d ' ')
-        
-        if [ -n "$chain_id" ]; then
-            echo "$chain_id"
-            return 0
-        fi
+        local chain_id=$(grep "^chain_id" "$config_file" | head -1 | awk '{print $3}' | tr -d ' ')
+        [ -n "$chain_id" ] && echo "$chain_id" && return 0
     fi
     
     # Default fallback
@@ -99,7 +93,7 @@ generate_pos_config() {
     
     # Generate unique seed for this container instance to avoid node ID conflicts
     # This ensures each devnet container has independent POS configuration
-    local container_id="${HOSTNAME:-$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo 'default')}"
+    local container_id="${HOSTNAME:-default-$(date +%s)}"
     local seed=$(echo -n "$container_id" | sha256sum | cut -d' ' -f1)
     
     # Run devnetctl with proper parameters
